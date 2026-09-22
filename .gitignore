@@ -1,0 +1,25 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+# ---- 数据与产物：永远不要提交 ----
+data/
+*.duckdb
+*.duckdb.wal
+*.parquet
+*.zip
+artifacts/
+
+# ---- Notebook ----
+.ipynb_checkpoints/
+
+# ---- 系统与编辑器 ----
+Thumbs.db
+.DS_Store
+.vscode/
