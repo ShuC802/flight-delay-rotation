@@ -7,7 +7,11 @@ authors = [
     { name = "Shu Chen", email = "chenshu@unc.edu" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "duckdb>=1.5.5",
+    "pandas>=3.0.6",
+    "pyarrow>=25.0.1",
+]
 
 [project.scripts]
 flight-delay-rotation = "flight_delay_rotation:main"
