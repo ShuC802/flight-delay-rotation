@@ -23,3 +23,5 @@ artifacts/
 Thumbs.db
 .DS_Store
 .vscode/
+
+scratch/
