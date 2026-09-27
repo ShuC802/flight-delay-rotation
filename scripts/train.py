@@ -1,13 +1,3 @@
-"""Ablation: how much does the aircraft's recent history add, at each cutoff?
-
-The schedule-only model does not depend on the cutoff at all -- it uses the
-same features and the same flights however far out you stand. So it is a
-single fixed REFERENCE LINE, and the question is how far above it the
-aircraft-aware models sit at each cutoff.
-
-Everything is scored on the SAME test flights. The number that matters is the
-DELTA in average precision, not either model's absolute score.
-"""
 import duckdb
 import lightgbm as lgb
 import pandas as pd
@@ -59,7 +49,7 @@ def load(cutoff: int) -> pd.DataFrame:
     return df
 
 
-def fit_and_score(df: pd.DataFrame, features: list[str]) -> dict:
+def fit_and_score(df: pd.DataFrame, features: list[str], label: str):
     tr, va, te = (df[df.split == s] for s in ("train", "valid", "test"))
 
     model = lgb.train(
@@ -70,40 +60,60 @@ def fit_and_score(df: pd.DataFrame, features: list[str]) -> dict:
         callbacks=[lgb.early_stopping(50, verbose=False)],
     )
     p = model.predict(te[features], num_iteration=model.best_iteration)
-    return {
+
+    metrics = {
         "ap": average_precision_score(te["y"], p),
         "brier": brier_score_loss(te["y"], p),
         "rounds": model.best_iteration,
     }
+    # Keep the test-set predictions: calibration cannot be checked from a
+    # summary metric, only from the probabilities themselves.
+    preds = pd.DataFrame({
+        "model": label,
+        "flight_id": te["flight_id"].to_numpy(),
+        "y": te["y"].to_numpy(),
+        "p": p,
+    })
+    return metrics, preds
 
+
+all_preds = []
 
 # ---- the reference line: schedule only, trained once ----
 base_df = load(CUTOFFS[0])
-ref = fit_and_score(base_df, SCHEDULE_FEATURES)
+ref_metrics, ref_preds = fit_and_score(base_df, SCHEDULE_FEATURES, "schedule only")
+all_preds.append(ref_preds)
 floor = base_df.loc[base_df.split == "test", "y"].mean()
 
 print(f"test base rate (AP floor)   : {floor:.4f}")
-print(f"schedule-only model      AP : {ref['ap']:.4f}   "
-      f"Brier {ref['brier']:.4f}   ({ref['rounds']} rounds)")
+print(f"schedule-only model      AP : {ref_metrics['ap']:.4f}   "
+      f"Brier {ref_metrics['brier']:.4f}   ({ref_metrics['rounds']} rounds)")
 print()
 
 # ---- one aircraft-aware model per cutoff ----
 rows = []
 for cutoff in CUTOFFS:
     df = load(cutoff)
-    res = fit_and_score(df, SCHEDULE_FEATURES + ROTATION_FEATURES)
+    res, preds = fit_and_score(df, SCHEDULE_FEATURES + ROTATION_FEATURES,
+                               f"+rotation @ {cutoff} min")
+    all_preds.append(preds)
     rows.append({
         "cutoff_min": cutoff,
         "ap": res["ap"],
-        "delta_ap": res["ap"] - ref["ap"],
+        "delta_ap": res["ap"] - ref_metrics["ap"],
         "brier": res["brier"],
         "rounds": res["rounds"],
     })
     print(f"cutoff {cutoff:>5} min   AP {res['ap']:.4f}   "
-          f"delta {res['ap'] - ref['ap']:+.4f}   Brier {res['brier']:.4f}")
+          f"delta {res['ap'] - ref_metrics['ap']:+.4f}   Brier {res['brier']:.4f}")
 
 out = pd.DataFrame(rows)
-out.insert(0, "ap_reference", ref["ap"])
+out.insert(0, "ap_reference", ref_metrics["ap"])
 out.insert(0, "ap_floor", floor)
 out.to_csv("data/interim/ablation.csv", index=False)
 print("\nsaved -> data/interim/ablation.csv")
+
+pd.concat(all_preds, ignore_index=True).to_parquet(
+    "data/interim/predictions.parquet", index=False
+)
+print("saved -> data/interim/predictions.parquet")
