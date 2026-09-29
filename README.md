@@ -8,7 +8,7 @@ Two years of US domestic flights — 13.8 million flights — evaluated at five 
 
 ## Key result
 
-A schedule-only model reaches an average precision of **0.382** against a no-skill floor of **0.233**, a gain of **0.149**. Aircraft state adds:
+On the conservative population, which excludes flights with impossible recorded rotations, a schedule-only model reaches an average precision of **0.382** against a no-skill floor of **0.233**, a gain of **0.149**. Aircraft state adds:
 
 | Prediction cutoff | Conservative | Upper bound | Conservative gain as a share of the timetable's value |
 | --- | ---: | ---: | ---: |
@@ -88,7 +88,7 @@ All airport times are converted to UTC before aircraft legs are ordered. Only sc
 - Average precision, with the base rate as the no-skill floor
 - Brier score
 - Reliability diagram
-- Historical route × departure-hour baseline: **0.363** AP against a floor of 0.242; the schedule-only model reaches 0.393
+- On the full test population, the historical route × departure-hour baseline reaches **0.363** AP against a floor of 0.242; the schedule-only model reaches **0.393**
 
 Chronological split:
 
@@ -102,7 +102,7 @@ Chronological split:
 
 ![Reliability diagram](reports/calibration.png)
 
-All three models under-predict:
+On the full test population, all three models under-predict:
 
 | Model | Mean predicted | Observed | Bias |
 | --- | ---: | ---: | ---: |
@@ -110,7 +110,7 @@ All three models under-predict:
 | + aircraft state, 3 h | 0.212 | 0.242 | −0.031 |
 | + aircraft state, 45 min | 0.218 | 0.242 | −0.024 |
 
-Aircraft state reduces the bias by 43% but does not eliminate it. The remaining gap is largely seasonal: the test set is entirely June–September, while training contains only one summer.
+Aircraft state reduces the bias by 43% but does not eliminate it. The remaining gap is consistent with seasonality: the test set is entirely June–September, while training contains only one summer.
 
 ## Error analysis
 
@@ -187,7 +187,7 @@ The window stops at September 2025 because BTS moved to a new backend in October
 | Allegiant (G4) tail numbers omit the leading `N` | 138 of 138 tails; 241,330 flights | Normalized after confirming zero collisions. |
 | Flights with no tail number | 30,174, all cancellations | Removed by the cancellation filter. |
 | Arrival delay is right-skewed | median −6 min, mean +7 min | Target is binary rather than delay minutes. |
-| Scheduled turnaround distribution | p10 40 min, median 65, p90 628 | Median explains the 45-minute pivot; p90 is mostly overnight parking. |
+| Scheduled turnaround distribution | p10 40 min, median 65, p90 628 | Median aligns with the 45-minute pivot; p90 is mostly overnight parking. |
 
 ## Run
 
@@ -241,6 +241,8 @@ sql/
   04_rotation.sql           ASOF join: what was knowable at each cutoff
   05_features.sql           schedule features + chronological split
 
+src/flight_delay_rotation/
+
 scripts/
   download.py               fetch BTS monthly files, resumable
   build_all.py              rebuild every derived artifact, in order
@@ -253,7 +255,7 @@ scripts/
   plot_ablation.py
   plot_calibration.py
 
-tests/
+test/
   test_pipeline.py          eight invariants
 
 reports/
