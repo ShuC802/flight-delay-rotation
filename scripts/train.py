@@ -52,19 +52,28 @@ PARAMS = dict(
 )
 
 
+# Only what the models and the split need. SELECT * would also pull
+# timestamps and text columns, which at 24 months is gigabytes of nothing.
+NEEDED = list(dict.fromkeys(
+    ["flight_id", "split", "is_delayed"] + SCHEDULE_FEATURES + ROTATION_FEATURES
+))
+
+
 def load(cutoff: int, population: str) -> pd.DataFrame:
-    df = duckdb.sql(f"SELECT * FROM '{PQ}' WHERE cutoff_min = {cutoff}").df()
+    cols = ", ".join(NEEDED)
+    df = duckdb.sql(
+        f"SELECT {cols} FROM '{PQ}' WHERE cutoff_min = {cutoff}"
+    ).df()
     if population == "clean":
-        # A null turnaround is the aircraft's first observed leg and is fine;
-        # a negative one is physically impossible.
         df = df[df.sched_turn_min.isna() | (df.sched_turn_min >= 0)]
     for c in CATEGORICAL:
         df[c] = df[c].astype("category")
-    # True -> 1.0, False -> 0.0, NULL -> NaN. LightGBM handles NaN natively;
-    # filling it with 0 would assert "no", which is not what we know.
     for c in ["has_pred", "pred_contiguous"]:
         df[c] = df[c].astype("float64")
-    df["y"] = df["is_delayed"].astype(int)
+    # float32 is plenty for LightGBM and halves the memory.
+    for c in df.select_dtypes("float64").columns:
+        df[c] = df[c].astype("float32")
+    df["y"] = df["is_delayed"].astype("int8")
     return df
 
 

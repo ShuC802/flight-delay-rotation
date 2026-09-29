@@ -110,11 +110,11 @@ for t in leg.get_texts():
 fig.text(0.058, 0.975, "The models rank well, but predict too low",
          fontsize=16, fontweight="bold", color=INK, va="top")
 fig.text(0.058, 0.935,
-         "Trained on 1–20 June, when 27% of flights ran late; tested on 25–30 June, when 33% did.\n"
-         "Aircraft state sharpens the ranking — it does not fix the level. That is a separate problem.",
+         "Trained on October 2023 – March 2025, when 19.7% of flights ran late; tested on June–September\n"
+         "2025, when 24.2% did. Aircraft state improves both the ranking and the level — but not enough.",
          fontsize=9.5, color=INK_2, va="top", linespacing=1.6)
 fig.text(0.058, 0.022,
-         "Each point is a decile of predicted probability: ~11,800 flights, bin standard error ≈ 0.004. "
+         "Each point is a decile of predicted probability: ~236,000 flights, bin standard error ≈ 0.001. "
          "The gap is not sampling noise.",
          fontsize=8.8, color=MUTED, va="bottom")
 

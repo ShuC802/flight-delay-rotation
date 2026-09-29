@@ -1,3 +1,9 @@
+-- Turn the rotation table into something a model can consume: add the
+-- schedule-side features and assign the chronological split.
+--
+-- Input : data/interim/rotation.parquet
+-- Output: data/interim/features.parquet
+
 COPY (
 SELECT
     flight_id,
@@ -12,7 +18,7 @@ SELECT
     distance_mi,
     crs_elapsed_min,
     -- Local clock hour at the origin airport. Congestion follows the LOCAL
-    -- day, not UTC -- a 07:00 departure is a rush hour anywhere on earth.
+    -- day, not UTC -- 07:00 is rush hour anywhere on earth.
     extract('hour' FROM timezone(origin_tz, timezone('UTC', crs_dep_utc)))::INT
                                               AS dep_hour,
     extract('dow'  FROM fl_date)::INT         AS dep_dow,
@@ -33,9 +39,12 @@ SELECT
     crs_dep_utc,
     cutoff_utc,
 
+    -- Chronological split over 24 months. Training now contains a full
+    -- seasonal cycle including one summer, so the regime mismatch that made
+    -- the one-month experiment under-predict should be much reduced.
     CASE
-        WHEN fl_date <= DATE '2025-06-20' THEN 'train'
-        WHEN fl_date <= DATE '2025-06-24' THEN 'valid'
+        WHEN fl_date <= DATE '2025-03-31' THEN 'train'
+        WHEN fl_date <= DATE '2025-05-31' THEN 'valid'
         ELSE                                   'test'
     END                                       AS split
 FROM 'data/interim/rotation.parquet'

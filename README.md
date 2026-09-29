@@ -1,49 +1,39 @@
 # How much is it worth knowing where your aircraft is?
 
-Measuring how much an aircraft's recent operating history improves flight-delay
-prediction beyond schedule information, and how that value changes as departure
-approaches.
+How much does an aircraft's recent operating history improve flight-delay prediction beyond schedule information, and how does that value change as departure approaches?
 
-This project uses ~600,000 US domestic flights from June 2025 and evaluates
-predictions at five points before departure.
+Two years of US domestic flights — 13.8 million flights — evaluated at five prediction cutoffs.
 
 ![Gain in average precision by prediction cutoff](reports/ablation.png)
 
 ## Key result
 
-A flight's timetable already contains most of the predictive signal. Aircraft
-history adds to it, and the amount it adds grows sharply close to departure.
+A schedule-only model reaches an average precision of **0.382** against a no-skill floor of **0.233**, a gain of **0.149**. Aircraft state adds:
 
-| Model | Average precision | Gain vs. schedule-only |
-| --- | ---: | ---: |
-| No-skill floor (base rate) | 0.333 | — |
-| Route × departure-hour lookup | 0.541 | — |
-| Schedule-only model | 0.572 | — |
-| + aircraft state, 24 h out | 0.623 | +0.051 |
-| + aircraft state, 6 h out | 0.636 | +0.063 |
-| **+ aircraft state, 3 h out** | **0.667** | **+0.095** |
-| + aircraft state, 1.5 h out | 0.694 | +0.122 |
-| + aircraft state, 45 min out | 0.763 | +0.191 |
+| Prediction cutoff | Conservative | Upper bound | Conservative gain as a share of the timetable's value |
+| --- | ---: | ---: | ---: |
+| 24 hours before departure | +0.045 | +0.093 | 30% |
+| 6 hours before departure | +0.062 | +0.107 | 41% |
+| **3 hours before departure** | **+0.122** | +0.156 | **82%** |
+| 1.5 hours before departure | +0.168 | +0.195 | 113% |
+| 45 minutes before departure | +0.265 | +0.282 | 178% |
 
-At 3 hours before departure — while a traveller can still act on the
-information — adding aircraft state improves average precision by 0.095, about
-40% of what the timetable alone is worth.
+At three hours, aircraft history is worth almost as much as the timetable itself. At 45 minutes, it is worth nearly twice as much.
 
-In concrete terms: 45 minutes before departure the model identifies a tenth of
-flights of which **91% do arrive late**. Three hours out, that tenth is 80%
-late. Using the timetable alone, the worst tenth is 66%.
+For the 10% of flights the model ranks as highest risk:
 
-Much of the additional signal appears in the final 90 minutes, when the inbound
-aircraft's actual operating state becomes observable.
+| Model | Share that arrived late |
+| --- | ---: |
+| Schedule only | 46.6% |
+| + aircraft state, 3 h out | **67.4%** |
+| + aircraft state, 45 min out | **83.3%** |
+| *(base rate)* | *24.2%* |
+
+The two gain columns bracket the effect of aircraft swaps. About 1.2% of flights have an impossible recorded rotation: the aircraft departs before it was scheduled to arrive. Those cases are highly delayed, but BTS records only the tail that actually flew, not when the swap was decided. Excluding them gives the conservative estimate. See [Robustness: aircraft swaps](#robustness-aircraft-swaps).
 
 ## Preventing leakage at the prediction cutoff
 
-BTS provides a `LateAircraftDelay` column — the delay the Department of
-Transportation attributes to the previous flight of the same aircraft. It is
-populated only after the flight has landed, and only for flights that were
-late, so even its nullity gives away the outcome. Aircraft-history features
-therefore have to be reconstructed using only information that would have been
-available at each prediction cutoff.
+BTS includes `LateAircraftDelay`, but it is populated only after arrival and only for delayed flights. Even its nullity leaks the outcome. Aircraft-history features therefore have to be reconstructed from information available at each cutoff.
 
 ```sql
 -- Wrong: the previous scheduled leg may still be in the air
@@ -60,31 +50,25 @@ ASOF LEFT JOIN flights p
       AND  t.cutoff_utc >= p.act_arr_utc
 ```
 
-Measured on this data, the naive version would use post-cutoff information on
-**75.3% of rows at a 3-hour horizon** and **98.5% at 24 hours**.
+The naive join would use post-cutoff information on **73.4% of rows at a 3-hour horizon** and **98.1% at 24 hours**.
 
-This distinction matters because a chronological train/test split alone does
-not prevent leakage *inside* an individual row. The split is still necessary —
-it solves a different problem.
+A chronological train/test split does not prevent this because the leak is inside each row.
 
-Three independent measurements — the leakage rate of the naive join, the gain
-from aircraft features, and the staleness of the usable information — all pivot
-between the 90- and 45-minute cutoffs, which is where the median 65-minute
-scheduled turnaround sits.
-
-| Cutoff | Naive join would leak | Gain in AP | Median age of usable information |
+| Cutoff | Naive join would leak | Conservative gain | Median age of usable information |
 | ---: | ---: | ---: | ---: |
-| 90 min | 65.8% | +0.122 | 3.4 h |
-| 45 min | 25.7% | +0.191 | 1.3 h |
+| 90 min | 62.2% | +0.168 | 5.1 h |
+| 45 min | 19.7% | +0.265 | 1.8 h |
+
+The pivot between 90 and 45 minutes matches the median **65-minute** scheduled turnaround, both in a single month and across the full two-year dataset.
 
 ## Method
 
 ```text
 BTS CSV
-  → selected columns + parquet
-  → UTC timestamps
+  → selected columns + parquet          110 columns → 21
+  → UTC timestamps                      one conversion, the rest by arithmetic
   → completed, non-diverted flights
-  → aircraft rotation reconstruction (ASOF join, per cutoff)
+  → aircraft rotation reconstruction    ASOF join, per cutoff
   → cutoff-specific feature tables
   → chronological train / validation / test split
   → LightGBM ablation
@@ -92,124 +76,160 @@ BTS CSV
 
 Two feature sets are compared on the same test flights:
 
-- **Schedule-only:** carrier, origin, destination, distance, scheduled block
-  time, local departure hour, day of week
-- **Schedule + aircraft state:** delay of the last leg that had landed by the
-  cutoff, how stale that information is, observed ground time remaining,
-  whether the rotation chain is contiguous, scheduled turnaround
+- **Schedule only:** carrier, origin, destination, distance, scheduled block time, local departure hour, day of week
+- **Schedule + aircraft state:** delay of the last leg landed by the cutoff, information age, observed ground time remaining, rotation continuity, scheduled turnaround
 
-The model configuration, seed and test population are identical for both, so
-the difference measures the predictive value added by aircraft history.
+Model configuration, seed, and test population are identical for both.
 
-All local airport times are converted to UTC before aircraft legs are ordered;
-without that, legs crossing a timezone sort incorrectly. Only the *scheduled
-departure* is converted, and the other three timestamps are derived from it by
-adding plain minute counts, so midnight rollovers and daylight saving never
-require reasoning about a clock face. The untouched `CRSArrTime` column is then
-used as a cross-check: **611,549 of 611,573 rows agree to the minute.**
+All airport times are converted to UTC before aircraft legs are ordered. Only scheduled departure is converted directly; the other timestamps are derived by adding minute counts. As a cross-check, **14,054,178 of 14,055,118 rows agree to the minute** with the untouched `CRSArrTime` column; 940 disagree (0.0067%).
 
 ### Evaluation
 
-- Average precision, reported against the base rate as a no-skill floor
-- Brier score (0.190 for the schedule-only model, 0.146 with aircraft state at
-  45 minutes)
+- Average precision, with the base rate as the no-skill floor
+- Brier score
 - Reliability diagram
-- A historical route × departure-hour delay rate as the baseline any model must
-  beat
+- Historical route × departure-hour baseline: **0.363** AP against a floor of 0.242; the schedule-only model reaches 0.393
 
 Chronological split:
 
-```text
-Train:      June 1–20
-Validation: June 21–24
-Test:       June 25–30
-```
+| Split | Period | Flights | Delay rate |
+| --- | --- | ---: | ---: |
+| Train | Oct 2023 – Mar 2025 | 10,301,337 | 19.7% |
+| Validation | Apr – May 2025 | 1,175,280 | 21.7% |
+| Test | Jun – Sep 2025 | 2,364,298 | 24.2% |
 
 ## Calibration
 
 ![Reliability diagram](reports/calibration.png)
 
-Average precision only judges the ordering of the predictions. This figure
-judges the numbers themselves. All three models sit above the diagonal: they
-predict 0.28 on average where the observed rate is 0.33.
+All three models under-predict:
 
-The training period ran at a 27% delay rate; the test period ran at 33%. The
-models learned a calmer regime than the one they were scored in. Adding
-aircraft state sharpens the ranking and widens the range of probabilities the
-model is willing to use, but it does not move the level.
+| Model | Mean predicted | Observed | Bias |
+| --- | ---: | ---: | ---: |
+| Schedule only | 0.200 | 0.242 | −0.042 |
+| + aircraft state, 3 h | 0.212 | 0.242 | −0.031 |
+| + aircraft state, 45 min | 0.218 | 0.242 | −0.024 |
 
-Recalibrating on the validation split would not fix this, because the
-validation split belongs to the same calm period as the training data. A
-training set spanning more regimes would.
+Aircraft state reduces the bias by 43% but does not eliminate it. The remaining gap is largely seasonal: the test set is entirely June–September, while training contains only one summer.
+
+## Error analysis
+
+### The gain follows the mechanism
+
+If delay propagates through an aircraft's day, the gain should depend on turnaround structure:
+
+| Scheduled turnaround | Flights | Gain in AP at the 3 h cutoff |
+| --- | ---: | ---: |
+| ≤ 45 min | 538,535 | +0.143 |
+| 45–75 min | 856,710 | +0.119 |
+| 75–120 min | 237,362 | +0.100 |
+| 2–6 h | 143,044 | +0.144 |
+| Overnight (> 6 h) | 552,696 | +0.065 |
+
+Overnight aircraft carry less than half as much signal as tightly rotated aircraft. The 2–6 hour bucket is the exception because, at a 3-hour cutoff, the inbound often lands near the cutoff and is both recent and already observable.
+
+### Miscalibration is concentrated late in the day
+
+| Local departure hour | Flights | Observed | Predicted | Bias |
+| --- | ---: | ---: | ---: | ---: |
+| 06:00 | 163,677 | 0.088 | 0.108 | +0.020 |
+| 12:00 | 139,251 | 0.218 | 0.195 | −0.022 |
+| 17:00 | 147,512 | 0.370 | 0.279 | **−0.091** |
+
+Morning departures are slightly over-predicted; evening departures are under-predicted by up to nine points. A single recalibration constant cannot correct that shape.
+
+### A one-month finding did not replicate
+
+A June 2025 pilot suggested under-prediction was concentrated in the eastern US. That pattern disappears over two years. The most under-predicted airports are mostly small fields with 500–900 test flights; Denver is the only high-volume airport among them (110,915 flights, bias −0.080). The worst-biased carriers are YX (−0.059), UA (−0.053), and AS (−0.046).
+
+The June pattern appears to have been period-specific rather than stable.
+
+### Robustness: aircraft swaps
+
+**169,069 flights (1.22%)** have a scheduled turnaround below zero, meaning the recorded aircraft departs before it was scheduled to arrive. **87.5%** of those flights arrive late, versus 20.6% overall.
+
+BTS records the tail that operated the flight, not when that assignment was made, so swap timing cannot be reconstructed. Re-running the full experiment with those flights excluded from training, validation, and test gives:
+
+| Cutoff | All flights | Excluding impossible rotations | Share surviving |
+| --- | ---: | ---: | ---: |
+| 24 h | +0.093 | +0.045 | 48% |
+| 6 h | +0.107 | +0.062 | 58% |
+| 3 h | +0.156 | +0.122 | 78% |
+| 1.5 h | +0.195 | +0.168 | 86% |
+| 45 min | +0.282 | +0.265 | 94% |
+
+The swap effect is roughly fixed across horizons, so its share shrinks as departure approaches. Both estimates are reported because the data cannot identify the exact assignment time.
 
 ## Data
 
-Source: US Department of Transportation, Bureau of Transportation Statistics,
-[*Reporting Carrier On-Time Performance (1987–present)*](https://www.transtats.bts.gov/Tables.asp?QO_VQ=EFD).
-Airlines above a size threshold are required by regulation to report every
-domestic flight, so this is a census rather than a sample.
-
-For June 2025:
+Source: US Department of Transportation, Bureau of Transportation Statistics, [*Reporting Carrier On-Time Performance (1987–present)*](https://www.transtats.bts.gov/Tables.asp?QO_VQ=EFD).
 
 ```text
-611,575 raw rows (110 columns)
-599,456 flights after scope filters
-  5,648 aircraft
-  28.3% overall delay rate (ArrDel15)
+October 2023 – September 2025
+
+14,055,121 raw rows (110 columns)
+13,840,915 flights after scope filters
+     6,385 aircraft, 15 carriers
+     20.6% overall delay rate (ArrDel15)
+      2.97 legs per aircraft per day
 ```
 
-Tail numbers make it possible to reconstruct aircraft rotations across flights;
-most public flight datasets identify the flight but not the aircraft. BTS
-covers US domestic flights only, so an aircraft that flies abroad disappears
-from the data and reappears later.
+Tail numbers make it possible to reconstruct aircraft rotations across flights. BTS covers US domestic flights only, so aircraft disappear from the dataset while operating abroad.
+
+The window stops at September 2025 because BTS moved to a new backend in October 2025 and column names are not guaranteed to match.
 
 ### Data quality findings
 
-Each of these changed what the code does.
-
 | Finding | Measured | Handling |
 | --- | --- | --- |
-| Aircraft fly several legs per day | 3.6 / day | The premise of the project. At one leg per day there is no propagation to measure. |
-| Schedules physically impossible for a single aircraft | 9,814 legs (1.64%) | Previous leg's scheduled *arrival* falls after this leg's scheduled *departure*, so the tail linkage cannot be trusted. Those rows are marked as having no eligible predecessor. |
-| Previous destination ≠ this origin | 14,045 legs (2.34%) | Mostly international legs invisible to BTS. Flagged, not dropped. |
-| Allegiant (G4) reports tail numbers without the leading `N` | 125 of 125 of its tails | A naive "drop malformed tail numbers" filter removes one entire airline. Normalised instead, after confirming zero collisions. |
-| Flights with no tail number | 921, all cancellations | No aircraft was ever assigned; the cancellation filter removes them anyway. |
-| Arrival delay is heavily right-skewed | median −3 min, mean +15.5 min | Half of all flights arrive early, which is why the target is binary rather than a regression on minutes. |
+| Aircraft fly several legs per day | 2.97 / day | Required for propagation to be measurable. |
+| Impossible single-aircraft schedules | 169,069 legs (1.22%); 87.5% late | Marked as having no eligible predecessor; excluded in the conservative estimate. |
+| Allegiant (G4) tail numbers omit the leading `N` | 138 of 138 tails; 241,330 flights | Normalized after confirming zero collisions. |
+| Flights with no tail number | 30,174, all cancellations | Removed by the cancellation filter. |
+| Arrival delay is right-skewed | median −6 min, mean +7 min | Target is binary rather than delay minutes. |
+| Scheduled turnaround distribution | p10 40 min, median 65, p90 628 | Median explains the 45-minute pivot; p90 is mostly overnight parking. |
 
 ## Run
 
 ```bash
 uv sync
 
-# Put one or more BTS monthly CSVs in data/raw/
-
-uv run python scripts/build_all.py
+uv run python scripts/download.py 2023-10 2025-09   # ~7 GB of CSV
+uv run python scripts/build_all.py                  # ~50 min
+uv run pytest -q                                    # pipeline invariants
 uv run python scripts/baseline.py
-uv run python scripts/train.py
+uv run python scripts/train.py                      # ~1-2 h, 12 models
 uv run python scripts/plot_ablation.py
 uv run python scripts/plot_calibration.py
+uv run python scripts/report_numbers.py             # every figure quoted above
 ```
 
-`build_all.py` deletes every derived artefact before rebuilding, so a run that
-fails halfway cannot leave behind files that look complete.
+`build_all.py` deletes derived artifacts before rebuilding. `download.py` skips months already on disk, so interrupted downloads can resume.
+
+Every number in this README comes from `report_numbers.py` or training output.
+
+## Tests
+
+`uv run pytest -q` checks eight pipeline invariants:
+
+- No predecessor landed after its cutoff
+- Post-hoc delay-attribution columns never reach the feature table
+- Scheduled arrival round-trips through UTC to within 0.1%
+- The feature table contains every column required by the models
+- Every airport has a timezone
+- Tail numbers are normalized
+- The natural key is unique
+- The analysis population contains only completed, non-diverted flights
 
 ## Limitations
 
-- The current experiment uses only one month of data, so the results should be
-  treated as directional rather than general estimates.
-- Test-period delay rates were higher than training-period rates, causing the
-  models to under-predict absolute probabilities by about five points.
-- BTS covers US domestic flights only, so international legs create gaps in
-  aircraft rotation history.
-- The 45-minute cutoff is mainly an upper bound on the value of aircraft state
-  rather than a practically useful decision point — by then you are at the gate.
-- Aircraft assignment is assumed to be known at the cutoff. That is reasonable
-  a few hours out and less certain a day ahead, so the 24-hour figure should be
-  read as an upper bound.
-- This measures predictive value, not causation. A late inbound aircraft and a
-  late departure may share a cause, such as the same weather system.
-- This is a historical simulation, not a live prediction system. BTS publishes
-  monthly archives.
+- **Aircraft swaps cannot be dated.** BTS records the tail that flew, not when it was assigned, so aircraft-state value is a range rather than a point estimate.
+- **The test period is entirely summer.** The chronological split contributes to the remaining under-prediction.
+- **The 45-minute cutoff has little decision value.** It is mainly an upper bound on the value of aircraft state.
+- **Aircraft assignment is assumed known at the cutoff.** That is more plausible a few hours before departure than a day ahead.
+- **This measures predictive value, not causation.** A late inbound and late departure may share a cause such as weather.
+- **Historical simulation only.** Live serving would require a different data source.
+- **Cancellations are excluded.** Modeling them is future work.
 
 ## Repository structure
 
@@ -217,29 +237,34 @@ fails halfway cannot leave behind files that look complete.
 sql/
   01_raw_to_parquet.sql     110 columns -> 21, CSV -> parquet
   02_timestamps.sql         local wall-clock -> UTC
-  03_analysis_table.sql     scope filters, tail normalisation, target
+  03_analysis_table.sql     scope filters, tail normalization, target
   04_rotation.sql           ASOF join: what was knowable at each cutoff
   05_features.sql           schedule features + chronological split
 
 scripts/
-  build_all.py              rebuild every derived artefact, in order
+  download.py               fetch BTS monthly files, resumable
+  build_all.py              rebuild every derived artifact, in order
   run_sql.py                execute one .sql file
   build_airport_tz.py       IATA code -> IANA timezone
-  baseline.py
-  train.py
+  baseline.py               historical route x hour lookup
+  train.py                  ablation, both populations
+  error_analysis.py         model errors and sources of gain
+  report_numbers.py         every figure quoted in this README
   plot_ablation.py
   plot_calibration.py
+
+tests/
+  test_pipeline.py          eight invariants
 
 reports/
   ablation.png
   calibration.png
 
-data/                       gitignored; regenerate from the source above
+data/                       gitignored; regenerate with download.py + build_all.py
 ```
 
 ## License
 
-Flight data: US Department of Transportation, Bureau of Transportation
-Statistics. US government work, public domain.
+Flight data: US Department of Transportation, Bureau of Transportation Statistics. US government work, public domain.
 
 Code: MIT.

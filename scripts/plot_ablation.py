@@ -109,7 +109,8 @@ ax.annotate("the inbound aircraft has usually\nlanded by here — median\nturnar
 fig.text(0.055, 0.965, "What knowing the aircraft is worth, and when",
          fontsize=15.5, fontweight="bold", color=INK, va="top")
 fig.text(0.055, 0.905,
-         "Gain over a model that sees only the timetable. Held-out flights, 25–30 June 2025.\n"
+         "Gain over a model that sees only the timetable. 2,364,298 held-out flights, June–September 2025,\n"
+         "from a model trained on October 2023 – March 2025.\n"
          "The band is the uncertainty from aircraft swaps, whose timing BTS does not record.",
          fontsize=9.5, color=INK_2, va="top", linespacing=1.6)
 
