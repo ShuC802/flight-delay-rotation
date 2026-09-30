@@ -1,0 +1,47 @@
+# Rebuild every derived artifact from raw input, then check the pipeline
+# invariants.
+#
+# The real input is ~7 GB of BTS CSV and is gitignored, so CI cannot use it.
+# test/fixtures/bts_sample.csv is a four-day slice of the same source: small
+# enough to commit, large enough that every one of the eight invariants is
+# actually exercised, and deliberately spanning the daylight-saving transition
+# of 3 November 2024, which is the case the UTC round-trip test exists to catch.
+#
+# The whole job runs in about two minutes, most of it dependency install.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:      # lets you re-run it by hand from the Actions tab
+
+# A newer push makes an in-flight run irrelevant; do not pay for it.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true          # reuse the wheel cache between runs
+
+      # --locked fails if uv.lock disagrees with pyproject.toml, so a
+      # dependency added without re-locking cannot pass. This is the part
+      # that makes "reproducible from the lockfile" a claim rather than a hope.
+      - name: Install the locked environment
+        run: uv sync --locked
+
+      - name: Rebuild the pipeline from the committed sample
+        run: |
+          mkdir -p data/raw
+          cp test/fixtures/bts_sample.csv data/raw/
+          uv run --no-sync python scripts/build_all.py
+
+      - name: Check pipeline invariants
+        run: uv run --no-sync pytest -q
