@@ -1,9 +1,18 @@
--- 把本地时间转成 UTC 时间戳
--- 输入: data/interim/flights.parquet + data/interim/airport_tz.parquet
--- 输出: data/interim/flights_utc.parquet
+-- Put every flight on a single UTC timeline, so that legs flown by the same
+-- aircraft can be ordered against each other.
 --
--- 策略: 只对「计划起飞」做一次时区转换，其余三个时刻用分钟数加法推出来。
---       这样跨午夜、跨时区、夏令时全部自动正确。
+-- Input : data/interim/flights.parquet + data/interim/airport_tz.parquet
+-- Output: data/interim/flights_utc.parquet
+--
+-- Strategy: convert EXACTLY ONE clock-face time -- scheduled departure -- and
+-- derive the other three by adding minute counts to it. Adding minutes to an
+-- absolute instant cannot go wrong, so midnight rollover, timezone boundaries
+-- and daylight saving are handled once instead of four times.
+--
+-- CRSArrTime is deliberately NOT used in this computation. That leaves it free
+-- to serve as an independent cross-check: crs_arr_utc converted back to
+-- destination local time must reproduce it. See
+-- test_scheduled_arrival_round_trips_through_utc.
 
 COPY (
 
@@ -20,7 +29,9 @@ WITH with_tz AS (
 parsed AS (
     SELECT
         *,
-        -- "0729" 拆成 7 和 29；"2400" 拆成 24 和 0
+        -- BTS stores departure time as an unpadded HHMM integer: 729 means
+        -- 07:29. lpad restores the leading zero before splitting.
+        -- "2400" needs no special case: to_hours(24) rolls into the next day.
         CAST(substr(lpad(crs_dep_hhmm, 4, '0'), 1, 2) AS BIGINT) AS h,
         CAST(substr(lpad(crs_dep_hhmm, 4, '0'), 3, 2) AS BIGINT) AS m
     FROM with_tz
@@ -29,8 +40,11 @@ parsed AS (
 stamped AS (
     SELECT
         *,
-        -- 内层 timezone(origin_tz, naive) : 把这个「墙上的钟面时间」按出发地时区解释成一个真实瞬间
-        -- 外层 timezone('UTC', instant)   : 把那个瞬间换算成 UTC 的钟面时间
+        -- Inner timezone(origin_tz, naive): read this wall-clock reading as a
+        --   local time at the origin airport, producing a real instant.
+        -- Outer timezone('UTC', instant): express that instant as UTC.
+        -- origin_tz is an IANA name such as America/Denver, not a fixed
+        -- offset, which is what makes daylight saving come out right.
         timezone(
             'UTC',
             timezone(
@@ -43,6 +57,7 @@ stamped AS (
 
 SELECT
     * EXCLUDE (h, m),
+    -- All three derived from crs_dep_utc by pure minute arithmetic.
     crs_dep_utc + to_minutes(CAST(crs_elapsed_min AS BIGINT))              AS crs_arr_utc,
     crs_dep_utc + to_minutes(CAST(dep_delay       AS BIGINT))              AS act_dep_utc,
     crs_dep_utc + to_minutes(CAST(crs_elapsed_min AS BIGINT))

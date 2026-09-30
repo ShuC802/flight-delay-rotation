@@ -1,16 +1,20 @@
 """Robustness check: does the headline result depend on aircraft swaps?
 
-2,098 test flights (1.8%) have a scheduled turnaround below zero -- the
-aircraft is recorded as departing before it was scheduled to arrive. Those are
-almost certainly aircraft swaps, and 90% of them arrive late against 33%
-overall. But a swap is a CONSEQUENCE of disruption, and BTS records the tail
-that actually flew, so a swap decided after the cutoff would still show up in
-these features.
+34,770 test flights (1.47% of the test split) have a scheduled turnaround
+below zero -- the aircraft is recorded as departing before the previous leg
+was due to land. Those are almost certainly aircraft swaps, and 88.7% of them
+arrive late against 24.2% across the test split. But a swap is a CONSEQUENCE
+of disruption, and BTS records only the tail that actually flew, so a swap
+decided AFTER the cutoff would still show up in these features.
 
-This script trains the ablation twice -- once on all flights, once with those
-excluded from train, validation and test -- and prints the two side by side.
+This script trains the two feature sets twice at the headline cutoff -- once
+on all flights, once with those flights excluded from train, validation and
+test -- and prints the two side by side.
 
-One command, no flags, nothing to remember:
+scripts/train.py now runs both populations at all five cutoffs and is what
+the README reports. This file stays because it is a single-cutoff check that
+can be read and re-run on its own, without the full ablation:
+
     uv run python scripts/robustness_check.py
 """
 import duckdb

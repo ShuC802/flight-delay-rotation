@@ -54,10 +54,15 @@ def ap_delta(g: pd.DataFrame) -> pd.Series:
 
 
 # ---------- Q1: does the gain follow scheduled turnaround? ----------
+# pd.cut is right-closed, so the first bucket is (-inf, 0] and the second is
+# (0, 45]. Note the boundary differs very slightly from chain_ok in
+# sql/04_rotation.sql, which treats a turnaround of exactly 0 as valid:
+# 5,651 legs sit on that line, so they are labelled "impossible" here but
+# kept in the `clean` population. Too few to move any number below.
 df["turn_bucket"] = pd.cut(
     df.sched_turn_min,
     bins=[-1e9, 0, 45, 75, 120, 360, 1e9],
-    labels=["negative (bad chain)", "≤45 min", "45–75", "75–120",
+    labels=["≤0 min (impossible)", "≤45 min", "45–75", "75–120",
             "2–6 h", "overnight (>6 h)"],
 )
 print("=== Q1. Gain by scheduled turnaround ===")

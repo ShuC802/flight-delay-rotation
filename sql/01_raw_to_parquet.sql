@@ -1,37 +1,47 @@
--- 把 BTS 原始 CSV 转成精简的 Parquet
--- 输入: data/raw/*.csv    输出: data/interim/flights.parquet
+-- Reduce the raw BTS export to the columns this study uses, and store it
+-- columnar.
+--
+-- Input : data/raw/*.csv                Output: data/interim/flights.parquet
+--
+-- BTS ships 110 columns per month; 22 of them are enough here. The CSV is
+-- also the slowest thing in the pipeline, so this is the one place it is read.
+-- union_by_name tolerates the column-order changes BTS has made between years.
 
 COPY (
     SELECT
-        -- ---- 身份 ----
+        -- ---- identity ----
         FlightDate                       AS fl_date,
         Reporting_Airline                AS carrier,
         Flight_Number_Reporting_Airline  AS flight_num,
         Tail_Number                      AS tail_num,
 
-        -- ---- 航线 ----
+        -- ---- route ----
         Origin                           AS origin,
         Dest                             AS dest,
         Distance                         AS distance_mi,
 
-        -- ---- 时刻表（订票时就可知）----
+        -- ---- the timetable: known at booking time ----
         CRSDepTime                       AS crs_dep_hhmm,
         CRSArrTime                       AS crs_arr_hhmm,
         CRSElapsedTime                   AS crs_elapsed_min,
 
-        -- ---- 实际发生（事后才知）----
+        -- ---- what actually happened: known only afterwards ----
         DepTime                          AS dep_hhmm,
         DepDelay                         AS dep_delay,
         ArrTime                          AS arr_hhmm,
         ArrDelay                         AS arr_delay,
         ArrDel15                         AS arr_del15,
 
-        -- ---- 状态 ----
+        -- ---- status ----
         Cancelled                        AS cancelled,
         CancellationCode                 AS cancel_code,
         Diverted                         AS diverted,
 
-        -- ---- x_ 前缀 = 只用于事后验证，永远不许进特征 ----
+        -- ---- x_ prefix = post-hoc only, never allowed to become a feature.
+        -- BTS fills these in after arrival, and only for delayed flights, so
+        -- even their nullity gives away the label. The prefix makes that
+        -- rule mechanical: test/test_pipeline.py fails if an x_ column ever
+        -- reaches the feature table.
         CarrierDelay                     AS x_carrier_delay,
         WeatherDelay                     AS x_weather_delay,
         NASDelay                         AS x_nas_delay,

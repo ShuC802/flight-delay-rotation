@@ -7,14 +7,14 @@
 --   * Scope is completed, non-diverted flights. Cancellations are EXCLUDED,
 --     never silently counted as on-time. Modelling them is future work.
 --   * Carrier G4 (Allegiant) reports tail numbers without the leading "N".
---     125 of 125 of its tails are affected and prefixing "N" collides with no
---     existing tail, so we normalise instead of dropping -- dropping would
---     remove one entire airline from the study.
+--     All 138 of its tails are affected, covering 241,330 flights, and
+--     prefixing "N" collides with no existing tail, so we normalise instead
+--     of dropping -- dropping would remove one entire airline from the study.
 --   * Flights with no usable tail number are KEPT and flagged. They can have
 --     no rotation features, but the ablation requires both feature sets to be
 --     scored on the SAME test flights.
---   * A handful of rows per month where CRSArrTime disagrees with
---     CRSDepTime + CRSElapsedTime are dropped: BTS data-entry errors.
+--   * Rows where CRSArrTime disagrees with CRSDepTime + CRSElapsedTime are
+--     dropped as BTS data-entry errors: 940 of 14,055,118 (0.0067%).
 
 COPY (
 

@@ -1,3 +1,11 @@
+-- Reconstruct, for every flight and every prediction cutoff, what was
+-- knowable about the aircraft at that moment.
+--
+-- Input : data/interim/analysis.parquet
+-- Output: data/interim/rotation.parquet   (one row per flight x cutoff)
+--
+-- This is the file the whole project turns on. See the ASOF join below.
+
 COPY (
 
 -- Prediction cutoffs, in MINUTES before scheduled departure.
@@ -15,8 +23,14 @@ WITH cutoffs(cutoff_min, cutoff_h) AS (
 
 -- Chain health, from the SCHEDULE only, one value per flight.
 -- A negative scheduled turnaround is physically impossible for a single
--- aircraft, so the tail linkage around that flight cannot be trusted.
--- Measured at 1.64% of legs in 2025-06.
+-- aircraft -- it departs before the previous leg was due to land -- so the
+-- tail linkage around that flight cannot be trusted. In practice these are
+-- aircraft swaps. 169,069 of 13,840,915 legs (1.22%) across Oct 2023 -
+-- Sep 2025; 87.5% of them arrive late, against 20.6% overall.
+--
+-- LAG is used here ONLY to diagnose the chain, never to build a feature:
+-- "the previous row" is not the same thing as "what had already happened",
+-- which is what the ASOF join below is for.
 chain AS (
     SELECT
         flight_id,
@@ -41,8 +55,18 @@ targets AS (
     LEFT JOIN chain ch USING (flight_id)
 ),
 
--- The core join. LEFT is deliberate: "no eligible predecessor" is a real and
--- common state that the model should be able to learn from, not a row to drop.
+-- The core join, and the reason this project exists.
+--
+-- LAG gives the previous row in the sequence, which at the cutoff may still
+-- be in the air; its arrival delay does not exist yet. ASOF gives the most
+-- recent leg whose ACTUAL arrival is at or before the cutoff, which is what
+-- a forecaster would really have had. A naive LAG would use post-cutoff
+-- information on 73.4% of rows at the 3-hour horizon and 98.1% at 24 hours,
+-- and a chronological train/test split would not catch any of it, because
+-- the leak is inside the row rather than across rows.
+--
+-- LEFT is deliberate: "no eligible predecessor" is a real and common state
+-- that the model should be able to learn from, not a row to drop.
 matched AS (
     SELECT
         t.*,

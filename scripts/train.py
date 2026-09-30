@@ -1,26 +1,31 @@
 """Ablation: how much does the aircraft's recent history add, at each cutoff?
 
-Runs the whole experiment twice, over two populations:
+Model, seed and test flights are held fixed; only the feature set changes, so
+the difference in average precision is attributable to the features alone.
 
-  all    every flight in the analysis table.
-  clean  flights whose recorded rotation is physically possible. 1.8% of
-         flights have a scheduled turnaround below zero -- the aircraft
-         departs before it was scheduled to arrive -- which in practice means
-         an aircraft swap. 90% of those flights arrive late, but a swap is a
-         CONSEQUENCE of disruption, and BTS records only the tail that flew,
-         not when the swap was decided. So we cannot tell whether that
-         information would have been available at the cutoff.
+The experiment runs over two populations:
+
+  all    every flight in the feature table.
+  clean  flights whose recorded rotation is physically possible. 1.22% of
+         legs have a scheduled turnaround below zero -- the aircraft departs
+         before the previous leg was due to land -- which in practice means
+         an aircraft swap. 87.5% of those flights arrive late against 20.6%
+         overall, but a swap is a CONSEQUENCE of disruption, and BTS records
+         only the tail that actually flew, not when the swap was decided. So
+         we cannot tell whether that signal was available at the cutoff.
 
 Neither population is "the right answer". Together they bracket it: `all` is
-an upper bound, `clean` a lower bound.
+an upper bound on the value of aircraft state, `clean` a lower bound. The
+README reports the pair, not a point estimate.
 
 The schedule-only model does not depend on the cutoff, so it is trained once
-per population and used as a single reference line.
+per population and reused as a single reference line.
 
-Writes:
-  data/interim/ablation.csv        the `all` population
-  data/interim/ablation_clean.csv  the `clean` population
-  data/interim/predictions.csv     test predictions from `all`, for calibration
+Outputs:
+  data/interim/ablation.csv          the `all` population
+  data/interim/ablation_clean.csv    the `clean` population
+  data/interim/predictions.parquet   test predictions from `all`, for the
+                                     reliability diagram and error analysis
 """
 import duckdb
 import lightgbm as lgb
@@ -29,16 +34,20 @@ from sklearn.metrics import average_precision_score, brier_score_loss
 
 PQ = "data/interim/features.parquet"
 CUTOFFS = [1440, 360, 180, 90, 45]
-HEADLINE = 180                      # the decision-relevant horizon
+HEADLINE = 180                      # the decision-relevant horizon: the last
+                                    # point at which a traveller can still act
 
 CATEGORICAL = ["carrier", "origin", "dest"]
 
 SCHEDULE_FEATURES = CATEGORICAL + [
     "distance_mi", "crs_elapsed_min", "dep_hour", "dep_dow",
 ]
-# dep_day is deliberately EXCLUDED. With one month of data it separates train
-# (days 1-20) from test (days 25-30) almost perfectly, so the model would
-# learn a calendar artefact instead of anything about flights.
+# dep_day (day of month) is deliberately EXCLUDED. It was first dropped when
+# the experiment ran on a single month, where days 1-20 were train and 25-30
+# were test, so the column separated the splits almost perfectly. Over 24
+# months it no longer leaks -- every day of the month appears in all three
+# splits -- but it is kept out anyway, so that the 24-month result stays
+# comparable with the one-month result it replaced.
 
 ROTATION_FEATURES = [
     "has_pred", "pred_arr_delay", "pred_staleness_h",
@@ -52,8 +61,7 @@ PARAMS = dict(
 )
 
 
-# Only what the models and the split need. SELECT * would also pull
-# timestamps and text columns, which at 24 months is gigabytes of nothing.
+# Load only the columns needed for training, scoring, and prediction output.
 NEEDED = list(dict.fromkeys(
     ["flight_id", "split", "is_delayed"] + SCHEDULE_FEATURES + ROTATION_FEATURES
 ))
@@ -70,7 +78,7 @@ def load(cutoff: int, population: str) -> pd.DataFrame:
         df[c] = df[c].astype("category")
     for c in ["has_pred", "pred_contiguous"]:
         df[c] = df[c].astype("float64")
-    # float32 is plenty for LightGBM and halves the memory.
+    # Use float32 to reduce memory use.
     for c in df.select_dtypes("float64").columns:
         df[c] = df[c].astype("float32")
     df["y"] = df["is_delayed"].astype("int8")
@@ -133,7 +141,8 @@ for population, suffix in [("all", ""), ("clean", "_clean")]:
     out.insert(0, "test_rows", test_n)
     out.to_csv(f"data/interim/ablation{suffix}.csv", index=False)
 
-    # Calibration is checked on the full population only.
+    # Only the `all` population feeds the reliability diagram and the error
+    # analysis; `clean` exists to bound the headline, not to be reported on.
     if population == "all":
         pd.concat(preds, ignore_index=True).to_parquet(
             "data/interim/predictions.parquet", index=False

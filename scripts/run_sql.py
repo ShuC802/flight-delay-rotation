@@ -1,4 +1,10 @@
-"""执行一个 .sql 文件。用法: uv run python scripts/run_sql.py sql/01_xxx.sql"""
+"""Execute one .sql file against DuckDB.
+
+The SQL files write their own outputs with COPY ... TO, so nothing is
+returned here; this is just a thin runner with timing.
+
+    uv run python scripts/run_sql.py sql/01_raw_to_parquet.sql
+"""
 import sys
 import time
 from pathlib import Path
@@ -10,4 +16,4 @@ sql = sql_path.read_text(encoding="utf-8")
 
 t0 = time.perf_counter()
 duckdb.sql(sql)
-print(f"✓ {sql_path}  ({time.perf_counter() - t0:.1f}s)")
+print(f"OK {sql_path}  ({time.perf_counter() - t0:.1f}s)")

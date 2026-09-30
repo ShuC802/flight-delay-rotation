@@ -75,10 +75,16 @@ show("Scheduled turnaround distribution (minutes)", f"""
     WHERE cutoff_min = 180 AND sched_turn_min IS NOT NULL
 """)
 
+# Two different quantities, previously reported under one name:
+#   pred_staleness_h  how old the information already was AT THE CUTOFF
+#   ground_time_min   how long the aircraft sits on the ground in total,
+#                     from its actual arrival to this flight's scheduled
+#                     departure. Equals staleness + cutoff_min by definition.
 show("Predecessor availability and information age, by cutoff", f"""
     SELECT cutoff_min,
-           round(100.0 * avg(has_pred::INT), 1)  AS pct_with_pred,
-           round(median(ground_time_min))        AS median_info_age_min
+           round(100.0 * avg(has_pred::INT), 1)          AS pct_with_pred,
+           round(median(pred_staleness_h), 2)            AS median_age_at_cutoff_h,
+           round(median(ground_time_min) / 60.0, 2)      AS median_ground_time_h
     FROM '{ROTATION}' GROUP BY cutoff_min ORDER BY cutoff_min DESC
 """)
 

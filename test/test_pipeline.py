@@ -1,6 +1,6 @@
 """Pipeline invariants.
 
-These exist because scaling from one month to three years introduces data this
+These exist because scaling from one month to two years introduces data this
 code has never seen: daylight-saving transitions, other years' schema quirks,
 airports and carriers that come and go. Every check here was written after
 something it guards against actually happened, or could have.

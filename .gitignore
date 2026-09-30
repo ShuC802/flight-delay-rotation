@@ -8,7 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
-# ---- 数据与产物：永远不要提交 ----
+# ---- data and derived artifacts: never commit ----
 data/
 *.duckdb
 *.duckdb.wal
@@ -19,7 +19,7 @@ artifacts/
 # ---- Notebook ----
 .ipynb_checkpoints/
 
-# ---- 系统与编辑器 ----
+# ---- OS and editor ----
 Thumbs.db
 .DS_Store
 .vscode/

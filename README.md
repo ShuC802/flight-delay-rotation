@@ -1,5 +1,7 @@
 # How much is it worth knowing where your aircraft is?
 
+[![tests](https://github.com/ShuC802/flight-delay-rotation/actions/workflows/tests.yml/badge.svg)](https://github.com/ShuC802/flight-delay-rotation/actions/workflows/tests.yml)
+
 How much does an aircraft's recent operating history improve flight-delay prediction beyond schedule information, and how does that value change as departure approaches?
 
 Two years of US domestic flights — 13.8 million flights — evaluated at five prediction cutoffs.
@@ -54,10 +56,10 @@ The naive join would use post-cutoff information on **73.4% of rows at a 3-hour 
 
 A chronological train/test split does not prevent this because the leak is inside each row.
 
-| Cutoff | Naive join would leak | Conservative gain | Median age of usable information |
+| Cutoff | Naive join would leak | Conservative gain | Median age of that information at the cutoff |
 | ---: | ---: | ---: | ---: |
-| 90 min | 62.2% | +0.168 | 5.1 h |
-| 45 min | 19.7% | +0.265 | 1.8 h |
+| 90 min | 62.2% | +0.168 | 3.6 h |
+| 45 min | 19.7% | +0.265 | 1.1 h |
 
 The pivot between 90 and 45 minutes matches the median **65-minute** scheduled turnaround, both in a single month and across the full two-year dataset.
 
@@ -77,7 +79,7 @@ BTS CSV
 Two feature sets are compared on the same test flights:
 
 - **Schedule only:** carrier, origin, destination, distance, scheduled block time, local departure hour, day of week
-- **Schedule + aircraft state:** delay of the last leg landed by the cutoff, information age, observed ground time remaining, rotation continuity, scheduled turnaround
+- **Schedule + aircraft state:** delay of the last leg landed by the cutoff, how old that information is at the cutoff, ground time between that landing and scheduled departure, rotation continuity, scheduled turnaround
 
 Model configuration, seed, and test population are identical for both.
 
@@ -221,6 +223,13 @@ Every number in this README comes from `report_numbers.py` or training output.
 - The natural key is unique
 - The analysis population contains only completed, non-diverted flights
 
+Every push runs the whole pipeline from raw CSV to feature table and then these
+eight checks, on GitHub Actions. The real input is 7 GB and cannot be committed,
+so CI rebuilds from `test/fixtures/bts_sample.csv`: four days of the same BTS
+file, chosen to span the 3 November 2024 daylight-saving transition so the UTC
+round-trip check is genuinely exercised. The job also runs `uv sync --locked`,
+which fails if `uv.lock` and `pyproject.toml` have drifted apart.
+
 ## Limitations
 
 - **Aircraft swaps cannot be dated.** BTS records the tail that flew, not when it was assigned, so aircraft-state value is a range rather than a point estimate.
@@ -241,7 +250,7 @@ sql/
   04_rotation.sql           ASOF join: what was knowable at each cutoff
   05_features.sql           schedule features + chronological split
 
-src/flight_delay_rotation/
+src/flight_delay_rotation/   package scaffold; the pipeline runs as scripts
 
 scripts/
   download.py               fetch BTS monthly files, resumable
@@ -251,12 +260,17 @@ scripts/
   baseline.py               historical route x hour lookup
   train.py                  ablation, both populations
   error_analysis.py         model errors and sources of gain
+  robustness_check.py       headline gain with and without aircraft swaps
   report_numbers.py         every figure quoted in this README
   plot_ablation.py
   plot_calibration.py
 
 test/
   test_pipeline.py          eight invariants
+  fixtures/                 four-day sample so CI can rebuild from raw
+
+.github/workflows/
+  tests.yml                 rebuild + invariants on every push
 
 reports/
   ablation.png

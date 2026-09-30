@@ -22,8 +22,9 @@ df = duckdb.sql(f"""
         SELECT avg(is_delayed::INT) AS global_rate FROM train
     ),
     -- Additive smoothing toward the global rate. A route-hour cell seen twice
-    -- should not be trusted to say "100% delayed"; k=20 means a cell needs
-    -- ~20 flights before its own rate dominates the prior.
+    -- should not be trusted to say "100% delayed". With k = 20 the cell's own
+    -- rate and the global prior carry equal weight at 20 flights, and the
+    -- cell only outweighs the prior above that.
     rates AS (
         SELECT t.route, t.dep_hour,
                (sum(t.is_delayed::INT) + 20 * p.global_rate)

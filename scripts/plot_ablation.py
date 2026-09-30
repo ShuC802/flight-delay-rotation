@@ -5,7 +5,7 @@ populations have different base rates and reference models -- only the gain is
 comparable between them.
 
 The two curves bracket the answer. Aircraft swaps produce rotations that are
-impossible on paper, and 90% of those flights arrive late; but BTS records
+impossible on paper, and 88% of those flights arrive late; but BTS records
 only the tail that actually flew, not when the swap was decided, so we cannot
 tell whether that information was available at the cutoff. Excluding them
 gives a lower bound, keeping them an upper bound.
