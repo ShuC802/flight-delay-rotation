@@ -12,6 +12,13 @@ import sys
 import time
 from pathlib import Path
 
+# data/ is gitignored, so a fresh clone has neither of these. DuckDB's
+# COPY ... TO will not create a missing directory; it fails with
+# "Cannot open file". Create them before anything writes.
+for d in ("data/raw", "data/interim"):
+    Path(d).mkdir(parents=True, exist_ok=True)
+    
+
 DERIVED = [
     "data/interim/airport_tz.parquet",
     "data/interim/flights.parquet",
